@@ -17,7 +17,12 @@ use std::{ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar,
-    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    input::{
+        RopeExt as _,
+        blink_cursor::{CURSOR_WIDTH, VIM_CURSOR_WIDTH},
+        display_map::LineLayout,
+        vim::VimMode,
+    },
 };
 
 use super::{
@@ -622,6 +627,7 @@ impl<M: InputModeKind> TextElement<M> {
             let cursor_pos = caret_for(cursor_row, cursor, affinity);
             let cursor_start = caret_for(sel_start_row, selected_range.start, false);
             let cursor_end = caret_for(sel_end_row, selected_range.end, false);
+            let mut block_cursor_width = None;
 
             if is_active {
                 current_row = Some(cursor_row);
@@ -692,20 +698,46 @@ impl<M: InputModeKind> TextElement<M> {
                         }
                     }
                 }
+
+                if state.vim == Some(VimMode::Normal) {
+                    if let Some(vi) = visible_buffer_lines.iter().position(|&bl| bl == cursor_row) {
+                        let line = &lines[vi];
+                        let line_start = last_layout.visible_line_byte_offsets[vi];
+                        let local = cursor.saturating_sub(line_start);
+                        if let Some(next_pos) = line.position_for_index(
+                            local + 1,
+                            last_layout,
+                            state.cursor_line_end_affinity,
+                        ) {
+                            block_cursor_width = Some((next_pos.x - cursor_pos.x).max(px(0.)));
+                        }
+                    }
+                }
             }
 
             // Apply the final horizontal offset to every caret after cursor-follow and
             // deferred scrolling have been resolved, regardless of selection order.
             let cursor_x = bounds.left() + cursor_pos.x + line_number_width;
+            let is_block_cursor = state.vim == Some(VimMode::Normal);
             cursor_infos.push(CursorRenderInfo {
                 bounds: Bounds::new(
                     point(
                         cursor_x,
                         bounds.top() + cursor_pos.y + ((line_height - cursor_height) / 2.),
                     ),
-                    size(CURSOR_WIDTH, cursor_height),
+                    size(
+                        block_cursor_width.unwrap_or_else(|| {
+                            if is_block_cursor {
+                                VIM_CURSOR_WIDTH
+                            } else {
+                                CURSOR_WIDTH
+                            }
+                        }),
+                        cursor_height,
+                    ),
                 ),
                 is_active,
+                is_block_cursor,
             });
         }
 
@@ -2288,6 +2320,9 @@ impl<M: InputModeKind> TextElement<M> {
 struct CursorRenderInfo {
     bounds: Bounds<Pixels>,
     is_active: bool,
+    /// Vim normal-mode block caret. Painted before the text so the glyph it
+    /// covers stays visible on top of the block instead of being hidden by it.
+    is_block_cursor: bool,
 }
 
 pub(super) struct PrepaintState {
@@ -2337,6 +2372,7 @@ impl PrepaintState {
                 CursorRenderInfo {
                     bounds,
                     is_active: info.is_active,
+                    is_block_cursor: info.is_block_cursor,
                 }
             })
             .collect()
@@ -3202,6 +3238,19 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window.paint_path(path.clone(), color);
         }
 
+        if focused && show_cursor {
+            for cursor_info in prepaint
+                .cursor_infos_with_scroll()
+                .into_iter()
+                .filter(|info| info.is_block_cursor)
+            {
+                window.paint_quad(fill(
+                    snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
+                    editor_style.caret,
+                ));
+            }
+        }
+
         // Paint text with inline completion ghost line support
         let mut offset_y = invisible_top_padding;
         let ghost_lines = &prepaint.ghost_lines;
@@ -3273,9 +3322,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             element.paint(window, cx);
         }
 
-        // Paint blinking cursors (shared blink state for all carets)
         if focused && show_cursor {
-            for cursor_info in prepaint.cursor_infos_with_scroll() {
+            for cursor_info in prepaint
+                .cursor_infos_with_scroll()
+                .into_iter()
+                .filter(|info| !info.is_block_cursor)
+            {
                 window.paint_quad(fill(
                     snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
                     editor_style.caret,

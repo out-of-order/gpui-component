@@ -187,9 +187,19 @@ impl InputModeKind for EditorMode {
     ) -> Stateful<Div> {
         element
             .key_context("Input mode=editor")
+            .on_key_down(window.listener_for(entity, InputBaseState::on_key_down))
             .on_action(window.listener_for(entity, InputBaseState::on_action_toggle_code_actions))
             .on_action(window.listener_for(entity, InputBaseState::on_action_show_completions))
             .on_action(window.listener_for(entity, InputBaseState::on_action_go_to_definition))
+    }
+
+    fn on_key_down(
+        state: &mut InputBaseState<Self>,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<InputBaseState<Self>>,
+    ) {
+        state.on_key_down(event, window, cx)
     }
 }
 

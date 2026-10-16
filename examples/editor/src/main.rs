@@ -701,6 +701,7 @@ impl Example {
                     tab_size: 4,
                     hard_tabs: false,
                 })
+                .vim()
                 .soft_wrap(false)
                 .default_value(include_str!("../fixtures/test.rs"))
                 .placeholder("Enter your code here...")

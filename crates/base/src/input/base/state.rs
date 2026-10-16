@@ -37,6 +37,8 @@ use super::{
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
+use crate::input::vim::VimMode::{self, Insert, Normal, Visual};
+use crate::input::vim::VimStateMachine;
 use crate::input::{
     InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
@@ -554,6 +556,8 @@ pub struct InputBaseState<M: InputModeKind> {
     _subscriptions: Vec<Subscription>,
 
     pub(super) auto_scroll: AutoScroll,
+    pub(super) vim: Option<VimMode>,
+    pub(super) vim_state: VimStateMachine,
 }
 
 /// Read-only styling data exposed to presentation facades.
@@ -882,7 +886,36 @@ impl<M: InputModeKind> InputBaseState<M> {
             _pending_update: false,
             cursor_line_end_affinity: false,
             auto_scroll: AutoScroll::default(),
+            vim: None,
+            vim_state: VimStateMachine::Idle,
         }
+    }
+
+    pub(super) fn delete_current_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cursor = self.cursor();
+        let line_end_affinity = self.line_end_affinity_at(cursor);
+        let start = self.start_of_line_at(cursor, line_end_affinity);
+        let end = self.end_of_line_at(cursor, line_end_affinity);
+        let end = if end < self.text.len() { end + 1 } else { end };
+        let range = self.range_to_utf16(&(start..end));
+        self.replace_text_in_range(Some(range), "", window, cx);
+    }
+
+    pub(super) fn open_line_below(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cursor = self.cursor();
+        let line_end_affinity = self.line_end_affinity_at(cursor);
+        let end = self.end_of_line_at(cursor, line_end_affinity);
+        let range = self.range_to_utf16(&(end..end));
+        self.replace_text_in_range(Some(range), "\n", window, cx);
+    }
+
+    pub(super) fn open_line_above(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cursor = self.cursor();
+        let line_end_affinity = self.line_end_affinity_at(cursor);
+        let start = self.start_of_line_at(cursor, line_end_affinity);
+        let range = self.range_to_utf16(&(start..start));
+        self.replace_text_in_range(Some(range), "\n", window, cx);
+        self.set_cursor_to(start);
     }
 
     /// Sets whether the context menu that shows on right-click is enabled.
@@ -11738,6 +11771,11 @@ impl InputBaseState<crate::input::EditorMode> {
         state
     }
 
+    pub fn vim(mut self) -> Self {
+        self.vim = Some(Normal);
+        self
+    }
+
     /// Set the language to highlight, e.g. `"rust"`.
     ///
     /// See [`Self::set_highlighter`] to change it after construction.
@@ -11908,5 +11946,38 @@ impl InputBaseState<crate::input::EditorMode> {
     pub fn set_smart_indent(&mut self, smart_indent: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.mode.set_smart_indent(smart_indent);
         cx.notify();
+    }
+
+    pub(super) fn on_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pause_blink_cursor(cx);
+        if let Some(vim_mode) = self.vim {
+            match vim_mode {
+                Insert => {
+                    if &event.keystroke.key == "escape" {
+                        self.vim_state = VimStateMachine::Idle;
+                        let cursor = self.cursor();
+                        let line_end_affinity = self.line_end_affinity_at(cursor);
+                        let line_start = self.start_of_line_at(cursor, line_end_affinity);
+                        if cursor > line_start {
+                            self.left(&crate::input::MoveLeft, window, cx);
+                        }
+                        self.switch_to_mode(Normal);
+                    }
+                }
+                Normal => {
+                    if let Some(cmd) = self.parse_key(&event.keystroke) {
+                        self.execute_command(cx, window, cmd);
+                    }
+                    cx.stop_propagation();
+                    window.prevent_default();
+                }
+                Visual => {}
+            }
+        }
     }
 }

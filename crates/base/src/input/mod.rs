@@ -74,6 +74,8 @@ mod textarea;
 mod touch;
 #[path = "base/undo_manager.rs"]
 mod undo_manager;
+#[path = "editor/vim.rs"]
+mod vim;
 
 pub(crate) fn init(cx: &mut App) {
     state::init(cx);

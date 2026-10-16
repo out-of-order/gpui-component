@@ -321,6 +321,15 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
     ) {
     }
 
+    /// Reacts to raw key-down events before action dispatch.
+    fn on_key_down(
+        _state: &mut InputBaseState<Self>,
+        _event: &gpui::KeyDownEvent,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<InputBaseState<Self>>,
+    ) {
+    }
+
     /// Registers the actions that only this mode handles.
     fn register_actions(
         element: Stateful<Div>,

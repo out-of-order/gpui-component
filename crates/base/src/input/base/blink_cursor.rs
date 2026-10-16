@@ -4,7 +4,14 @@ use instant::Duration;
 static INTERVAL: Duration = Duration::from_millis(500);
 static PAUSE_DELAY: Duration = Duration::from_millis(300);
 
-pub(super) const CURSOR_WIDTH: Pixels = px(1.);
+// On Windows, Linux, we should use integer to avoid blurry cursor.
+#[cfg(not(target_os = "macos"))]
+pub(super) const CURSOR_WIDTH: Pixels = px(2.);
+
+pub(super) const VIM_CURSOR_WIDTH: Pixels = px(8.);
+
+#[cfg(target_os = "macos")]
+pub(super) const CURSOR_WIDTH: Pixels = px(1.5);
 
 /// To manage the Input cursor blinking.
 ///
